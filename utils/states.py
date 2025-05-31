@@ -1,4 +1,9 @@
+# ==================== 3. UPDATED utils/states.py ====================
+"""
+Enhanced states with proper typing
+"""
 from aiogram.fsm.state import State, StatesGroup
+from typing import Optional
 
 class BattleStates(StatesGroup):
     # Initial battle setup

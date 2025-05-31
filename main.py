@@ -15,11 +15,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def test_database_connection():
+    """Test database connection on startup"""
+    try:
+        db = DatabaseManager(settings.DATABASE_PATH)
+        tester = DatabaseTester()
+        
+        logger.info("Testing database connection...")
+        success = await tester.test_basic_queries(db)
+        
+        if success:
+            logger.info("✅ Database connection successful!")
+            return True
+        else:
+            logger.error("❌ Database test failed!")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Database connection error: {e}")
+        return False
+    
 async def main():
     """Initialize and start the bot"""
     # Validate settings
     settings.validate()
     
+    db_ok = test_database_connection()
+    print(db_ok)
     # Initialize bot and dispatcher
     bot = Bot(
         token=settings.BOT_TOKEN,
