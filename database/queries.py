@@ -1021,3 +1021,725 @@ Last Updated: 2025
             logger.error(f"Error in delete_word: {e}")
             return False
 
+        # ==================== DISTRACTOR MANAGEMENT ====================
+    
+    async def create_word_distractors(self, word_id: int, distractor_1: str, 
+                                    distractor_2: str, distractor_3: str) -> bool:
+        """
+        Store 3 wrong answers for a word (for quiz multiple choice)
+        
+        Parameters:
+        - word_id: int - Word ID (required, must exist)
+        - distractor_1: str - First wrong answer (required)
+        - distractor_2: str - Second wrong answer (required)  
+        - distractor_3: str - Third wrong answer (required)
+        
+        Returns:
+        - Success: True
+        - Failure: False (if word doesn't exist or distractors already exist)
+        
+        Usage: success = await db.create_word_distractors(1, "cat", "dog", "bird")
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO word_distractors 
+                    (word_id, distractor_1, distractor_2, distractor_3)
+                    VALUES (?, ?, ?, ?)
+                """, (word_id, distractor_1, distractor_2, distractor_3))
+                await db.commit()
+                logger.info(f"Created distractors for word_id {word_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in create_word_distractors: {e}")
+            return False
+
+    async def get_word_distractors(self, word_id: int) -> Optional[Dict]:
+        """
+        Get distractors for a specific word
+        
+        Parameters:
+        - word_id: int - Word ID
+        
+        Returns:
+        - Success: {'word_id': int, 'distractor_1': str, 'distractor_2': str, 'distractor_3': str}
+        - Not found: None
+        
+        Usage: distractors = await db.get_word_distractors(1)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT word_id, distractor_1, distractor_2, distractor_3
+                    FROM word_distractors WHERE word_id = ?
+                """, (word_id,))
+                result = await cursor.fetchone()
+                
+                if result:
+                    return {
+                        'word_id': result[0],
+                        'distractor_1': result[1],
+                        'distractor_2': result[2],
+                        'distractor_3': result[3]
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_word_distractors: {e}")
+            return None
+
+    async def get_words_with_distractors(self, word_ids: List[int]) -> List[Dict]:
+        """
+        Batch get words with their distractors (optimized for battle sessions)
+        
+        Parameters:
+        - word_ids: list - List of word IDs
+        
+        Returns:
+        - Success: [{'id': int, 'uzbek': str, 'translation': str, 'word_photo': str,
+                    'distractors': ['dist1', 'dist2', 'dist3']}]
+        - Empty: []
+        
+        Usage: battle_words = await db.get_words_with_distractors([1, 2, 3, 4, 5])
+        """
+        try:
+            if not word_ids:
+                return []
+                
+            async with aiosqlite.connect(self.db_path) as db:
+                placeholders = ','.join('?' * len(word_ids))
+                cursor = await db.execute(f"""
+                    SELECT w.id, w.uzbek, w.translation, w.word_photo,
+                           wd.distractor_1, wd.distractor_2, wd.distractor_3
+                    FROM words w
+                    LEFT JOIN word_distractors wd ON w.id = wd.word_id
+                    WHERE w.id IN ({placeholders})
+                """, word_ids)
+                
+                results = await cursor.fetchall()
+                
+                words_with_distractors = []
+                for row in results:
+                    word_data = {
+                        'id': row[0],
+                        'uzbek': row[1],
+                        'translation': row[2],
+                        'word_photo': row[3],
+                        'distractors': []
+                    }
+                    
+                    # Add distractors if they exist
+                    if row[4] and row[5] and row[6]:
+                        word_data['distractors'] = [row[4], row[5], row[6]]
+                    
+                    words_with_distractors.append(word_data)
+                
+                return words_with_distractors
+                
+        except Exception as e:
+            logger.error(f"Error in get_words_with_distractors: {e}")
+            return []
+
+    async def update_word_distractors(self, word_id: int, distractor_1: str = None,
+                                    distractor_2: str = None, distractor_3: str = None) -> bool:
+        """
+        Update specific distractors for a word
+        
+        Parameters:
+        - word_id: int - Word ID (required)
+        - distractor_1: str - New first distractor (optional)
+        - distractor_2: str - New second distractor (optional)
+        - distractor_3: str - New third distractor (optional)
+        
+        Returns:
+        - Success: True
+        - Failure: False
+        
+        Usage: success = await db.update_word_distractors(1, distractor_1="new_wrong_answer")
+        """
+        try:
+            updates = []
+            params = []
+            
+            if distractor_1 is not None:
+                updates.append("distractor_1 = ?")
+                params.append(distractor_1)
+            if distractor_2 is not None:
+                updates.append("distractor_2 = ?")
+                params.append(distractor_2)
+            if distractor_3 is not None:
+                updates.append("distractor_3 = ?")
+                params.append(distractor_3)
+            
+            if not updates:
+                return True
+                
+            params.append(word_id)
+            
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(f"""
+                    UPDATE word_distractors SET {', '.join(updates)} WHERE word_id = ?
+                """, params)
+                await db.commit()
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in update_word_distractors: {e}")
+            return False
+
+    async def generate_random_distractors(self, word_id: int, topic_id: int) -> bool:
+        """
+        Auto-generate 3 random distractors from other words in the same topic
+        
+        Parameters:
+        - word_id: int - Target word ID
+        - topic_id: int - Topic ID to select distractors from
+        
+        Returns:
+        - Success: True
+        - Failure: False (if not enough words in topic)
+        
+        Usage: success = await db.generate_random_distractors(1, 1)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get other words from the same topic
+                cursor = await db.execute("""
+                    SELECT translation FROM words 
+                    WHERE topic_id = ? AND id != ? 
+                    ORDER BY RANDOM() LIMIT 3
+                """, (topic_id, word_id))
+                
+                potential_distractors = await cursor.fetchall()
+                
+                if len(potential_distractors) < 3:
+                    logger.warning(f"Not enough words in topic {topic_id} to generate distractors")
+                    return False
+                
+                distractors = [d[0] for d in potential_distractors]
+                
+                # Create distractors
+                await db.execute("""
+                    INSERT OR REPLACE INTO word_distractors 
+                    (word_id, distractor_1, distractor_2, distractor_3)
+                    VALUES (?, ?, ?, ?)
+                """, (word_id, distractors[0], distractors[1], distractors[2]))
+                
+                await db.commit()
+                logger.info(f"Generated random distractors for word_id {word_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in generate_random_distractors: {e}")
+            return False
+
+    # ==================== LEARNING PARTS MANAGEMENT ====================
+    
+    async def create_learning_parts(self, topic_id: int, part_size: int = 15) -> bool:
+        """
+        Generate learning parts for a topic (pre-calculated word groups for optimization)
+        
+        Parameters:
+        - topic_id: int - Topic ID (required)
+        - part_size: int - Words per part (default: 15, range: 15-20)
+        
+        Returns:
+        - Success: True
+        - Failure: False
+        
+        Usage: success = await db.create_learning_parts(1, 20)
+        """
+        try:
+            # Validate part_size
+            if not 15 <= part_size <= 20:
+                part_size = 15
+                
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get all words for this topic
+                cursor = await db.execute("""
+                    SELECT id FROM words WHERE topic_id = ? ORDER BY word_order
+                """, (topic_id,))
+                word_ids = [row[0] for row in await cursor.fetchall()]
+                
+                if not word_ids:
+                    logger.warning(f"No words found for topic {topic_id}")
+                    return False
+                
+                # Clear existing learning parts for this topic
+                await db.execute("DELETE FROM learning_parts WHERE topic_id = ?", (topic_id,))
+                
+                # Create parts
+                part_number = 1
+                for i in range(0, len(word_ids), part_size):
+                    part_word_ids = word_ids[i:i + part_size]
+                    
+                    await db.execute("""
+                        INSERT INTO learning_parts (topic_id, part_number, part_size, word_ids)
+                        VALUES (?, ?, ?, ?)
+                    """, (topic_id, part_number, len(part_word_ids), json.dumps(part_word_ids)))
+                    
+                    part_number += 1
+                
+                await db.commit()
+                logger.info(f"Created {part_number - 1} learning parts for topic {topic_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in create_learning_parts: {e}")
+            return False
+
+    async def get_learning_parts(self, topic_id: int) -> List[Dict]:
+        """
+        Get all learning parts for a topic
+        
+        Parameters:
+        - topic_id: int - Topic ID
+        
+        Returns:
+        - Success: [{'id': int, 'part_number': int, 'part_size': int, 'word_ids': [int]}]
+        - Empty: []
+        
+        Usage: parts = await db.get_learning_parts(1)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, part_number, part_size, word_ids
+                    FROM learning_parts WHERE topic_id = ? ORDER BY part_number
+                """, (topic_id,))
+                
+                parts = await cursor.fetchall()
+                
+                return [
+                    {
+                        'id': part[0],
+                        'part_number': part[1],
+                        'part_size': part[2],
+                        'word_ids': json.loads(part[3])
+                    }
+                    for part in parts
+                ]
+                
+        except Exception as e:
+            logger.error(f"Error in get_learning_parts: {e}")
+            return []
+
+    async def get_learning_part(self, topic_id: int, part_number: int) -> Optional[Dict]:
+        """
+        Get specific learning part
+        
+        Parameters:
+        - topic_id: int - Topic ID
+        - part_number: int - Part number (1, 2, 3, etc.)
+        
+        Returns:
+        - Success: {'id': int, 'part_number': int, 'part_size': int, 'word_ids': [int]}
+        - Not found: None
+        
+        Usage: part = await db.get_learning_part(1, 2)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, part_number, part_size, word_ids
+                    FROM learning_parts WHERE topic_id = ? AND part_number = ?
+                """, (topic_id, part_number))
+                
+                part = await cursor.fetchone()
+                
+                if part:
+                    return {
+                        'id': part[0],
+                        'part_number': part[1],
+                        'part_size': part[2],
+                        'word_ids': json.loads(part[3])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_learning_part: {e}")
+            return None
+
+    async def get_words_in_learning_part(self, topic_id: int, part_number: int) -> List[Dict]:
+        """
+        Get all words in a specific learning part with their data
+        
+        Parameters:
+        - topic_id: int - Topic ID
+        - part_number: int - Part number
+        
+        Returns:
+        - Success: [{'id': int, 'uzbek': str, 'translation': str, 'word_photo': str, 'note': str}]
+        - Not found: []
+        
+        Usage: words = await db.get_words_in_learning_part(1, 2)
+        """
+        try:
+            # Get learning part first
+            part = await self.get_learning_part(topic_id, part_number)
+            if not part:
+                return []
+            
+            # Get words by IDs
+            word_ids = part['word_ids']
+            if not word_ids:
+                return []
+                
+            async with aiosqlite.connect(self.db_path) as db:
+                placeholders = ','.join('?' * len(word_ids))
+                cursor = await db.execute(f"""
+                    SELECT id, uzbek, translation, word_photo, note
+                    FROM words WHERE id IN ({placeholders})
+                    ORDER BY word_order
+                """, word_ids)
+                
+                words = await cursor.fetchall()
+                
+                return [
+                    {
+                        'id': word[0],
+                        'uzbek': word[1],
+                        'translation': word[2],
+                        'word_photo': word[3],
+                        'note': word[4]
+                    }
+                    for word in words
+                ]
+                
+        except Exception as e:
+            logger.error(f"Error in get_words_in_learning_part: {e}")
+            return []
+
+    # ==================== BATTLE SESSION MANAGEMENT ====================
+    
+    async def create_battle_sessions_topic(self, topic_id: int, session_count: int = 10) -> bool:
+        """
+        Generate pre-calculated battle sessions for a topic (10 words each)
+        
+        Parameters:
+        - topic_id: int - Topic ID (required)
+        - session_count: int - Number of sessions to create (default: 10)
+        
+        Returns:
+        - Success: True
+        - Failure: False
+        
+        Usage: success = await db.create_battle_sessions_topic(1, 15)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get all words for this topic
+                cursor = await db.execute("""
+                    SELECT id FROM words WHERE topic_id = ? ORDER BY word_order
+                """, (topic_id,))
+                word_ids = [row[0] for row in await cursor.fetchall()]
+                
+                if len(word_ids) < 10:
+                    logger.warning(f"Topic {topic_id} has less than 10 words, cannot create battle sessions")
+                    return False
+                
+                # Clear existing battle sessions
+                await db.execute("DELETE FROM battle_sessions_topic WHERE topic_id = ?", (topic_id,))
+                
+                # Create battle sessions
+                for session_num in range(1, session_count + 1):
+                    # Randomly select 10 words
+                    session_words = random.sample(word_ids, 10)
+                    
+                    await db.execute("""
+                        INSERT INTO battle_sessions_topic (topic_id, session_number, word_ids)
+                        VALUES (?, ?, ?)
+                    """, (topic_id, session_num, json.dumps(session_words)))
+                
+                await db.commit()
+                logger.info(f"Created {session_count} battle sessions for topic {topic_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in create_battle_sessions_topic: {e}")
+            return False
+
+    async def create_battle_sessions_book(self, book_id: int, session_count: int = 10) -> bool:
+        """
+        Generate pre-calculated battle sessions for a book (10 words each from all topics)
+        
+        Parameters:
+        - book_id: int - Book ID (required)
+        - session_count: int - Number of sessions to create (default: 10)
+        
+        Returns:
+        - Success: True
+        - Failure: False
+        
+        Usage: success = await db.create_battle_sessions_book(1, 20)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get all words from all topics in this book
+                cursor = await db.execute("""
+                    SELECT w.id FROM words w
+                    JOIN topics t ON w.topic_id = t.id
+                    WHERE t.book_id = ?
+                    ORDER BY t.topic_order, w.word_order
+                """, (book_id,))
+                word_ids = [row[0] for row in await cursor.fetchall()]
+                
+                if len(word_ids) < 10:
+                    logger.warning(f"Book {book_id} has less than 10 words, cannot create battle sessions")
+                    return False
+                
+                # Clear existing battle sessions
+                await db.execute("DELETE FROM battle_sessions_book WHERE book_id = ?", (book_id,))
+                
+                # Create battle sessions
+                for session_num in range(1, session_count + 1):
+                    # Randomly select 10 words from the entire book
+                    session_words = random.sample(word_ids, 10)
+                    
+                    await db.execute("""
+                        INSERT INTO battle_sessions_book (book_id, session_number, word_ids)
+                        VALUES (?, ?, ?)
+                    """, (book_id, session_num, json.dumps(session_words)))
+                
+                await db.commit()
+                logger.info(f"Created {session_count} battle sessions for book {book_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in create_battle_sessions_book: {e}")
+            return False
+
+    async def get_battle_session_topic(self, topic_id: int, session_number: int) -> Optional[Dict]:
+        """
+        Get specific topic battle session
+        
+        Parameters:
+        - topic_id: int - Topic ID
+        - session_number: int - Session number
+        
+        Returns:
+        - Success: {'id': int, 'session_number': int, 'word_ids': [int]}
+        - Not found: None
+        
+        Usage: session = await db.get_battle_session_topic(1, 3)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, session_number, word_ids
+                    FROM battle_sessions_topic 
+                    WHERE topic_id = ? AND session_number = ?
+                """, (topic_id, session_number))
+                
+                session = await cursor.fetchone()
+                
+                if session:
+                    return {
+                        'id': session[0],
+                        'session_number': session[1],
+                        'word_ids': json.loads(session[2])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_battle_session_topic: {e}")
+            return None
+
+    async def get_battle_session_book(self, book_id: int, session_number: int) -> Optional[Dict]:
+        """
+        Get specific book battle session
+        
+        Parameters:
+        - book_id: int - Book ID
+        - session_number: int - Session number
+        
+        Returns:
+        - Success: {'id': int, 'session_number': int, 'word_ids': [int]}
+        - Not found: None
+        
+        Usage: session = await db.get_battle_session_book(1, 5)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, session_number, word_ids
+                    FROM battle_sessions_book 
+                    WHERE book_id = ? AND session_number = ?
+                """, (book_id, session_number))
+                
+                session = await cursor.fetchone()
+                
+                if session:
+                    return {
+                        'id': session[0],
+                        'session_number': session[1],
+                        'word_ids': json.loads(session[2])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_battle_session_book: {e}")
+            return None
+
+    async def get_random_battle_session_topic(self, topic_id: int) -> Optional[Dict]:
+        """
+        Get random battle session from topic
+        
+        Parameters:
+        - topic_id: int - Topic ID
+        
+        Returns:
+        - Success: {'id': int, 'session_number': int, 'word_ids': [int]}
+        - Not found: None
+        
+        Usage: session = await db.get_random_battle_session_topic(1)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, session_number, word_ids
+                    FROM battle_sessions_topic 
+                    WHERE topic_id = ? 
+                    ORDER BY RANDOM() LIMIT 1
+                """, (topic_id,))
+                
+                session = await cursor.fetchone()
+                
+                if session:
+                    return {
+                        'id': session[0],
+                        'session_number': session[1],
+                        'word_ids': json.loads(session[2])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_random_battle_session_topic: {e}")
+            return None
+
+    async def get_random_battle_session_book(self, book_id: int) -> Optional[Dict]:
+        """
+        Get random battle session from book
+        
+        Parameters:
+        - book_id: int - Book ID
+        
+        Returns:
+        - Success: {'id': int, 'session_number': int, 'word_ids': [int]}
+        - Not found: None
+        
+        Usage: session = await db.get_random_battle_session_book(1)
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, session_number, word_ids
+                    FROM battle_sessions_book 
+                    WHERE book_id = ? 
+                    ORDER BY RANDOM() LIMIT 1
+                """, (book_id,))
+                
+                session = await cursor.fetchone()
+                
+                if session:
+                    return {
+                        'id': session[0],
+                        'session_number': session[1],
+                        'word_ids': json.loads(session[2])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in get_random_battle_session_book: {e}")
+            return None
+
+    # ==================== CLEANUP & OPTIMIZATION ====================
+    
+    async def cleanup_expired_battles(self) -> int:
+        """
+        Remove expired friend battles (older than 24 hours)
+        
+        Parameters: None
+        
+        Returns:
+        - Success: int - Number of expired battles removed
+        - Failure: 0
+        
+        Usage: removed_count = await db.cleanup_expired_battles()
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    DELETE FROM friend_battles 
+                    WHERE expires_at < datetime('now')
+                """)
+                await db.commit()
+                
+                removed_count = cursor.rowcount
+                if removed_count > 0:
+                    logger.info(f"Cleaned up {removed_count} expired friend battles")
+                return removed_count
+                
+        except Exception as e:
+            logger.error(f"Error in cleanup_expired_battles: {e}")
+            return 0
+
+    async def regenerate_all_optimizations(self, book_id: int = None) -> bool:
+        """
+        Regenerate all optimization data (learning parts, battle sessions, distractors)
+        
+        Parameters:
+        - book_id: int - Specific book ID (optional, None for all books)
+        
+        Returns:
+        - Success: True
+        - Failure: False
+        
+        Usage: success = await db.regenerate_all_optimizations()  # All books
+        Usage: success = await db.regenerate_all_optimizations(1)  # Specific book
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                if book_id:
+                    # Get topics for specific book
+                    cursor = await db.execute("SELECT id FROM topics WHERE book_id = ?", (book_id,))
+                    topic_ids = [row[0] for row in await cursor.fetchall()]
+                    book_ids = [book_id]
+                else:
+                    # Get all topics and books
+                    cursor = await db.execute("SELECT id FROM topics")
+                    topic_ids = [row[0] for row in await cursor.fetchall()]
+                    cursor = await db.execute("SELECT id FROM books")
+                    book_ids = [row[0] for row in await cursor.fetchall()]
+                
+                success_count = 0
+                
+                # Regenerate for each topic
+                for topic_id in topic_ids:
+                    # Create learning parts
+                    if await self.create_learning_parts(topic_id):
+                        success_count += 1
+                    
+                    # Create battle sessions for topic
+                    if await self.create_battle_sessions_topic(topic_id):
+                        success_count += 1
+                    
+                    # Generate distractors for all words in topic
+                    cursor = await db.execute("SELECT id FROM words WHERE topic_id = ?", (topic_id,))
+                    word_ids = [row[0] for row in await cursor.fetchall()]
+                    
+                    for word_id in word_ids:
+                        await self.generate_random_distractors(word_id, topic_id)
+                
+                # Regenerate battle sessions for books
+                for book_id_item in book_ids:
+                    if await self.create_battle_sessions_book(book_id_item):
+                        success_count += 1
+                
+                logger.info(f"Regenerated optimizations: {success_count} operations completed")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error in regenerate_all_optimizations: {e}")
+            return False
