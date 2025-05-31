@@ -436,17 +436,17 @@ class VocabularyBattleDB:
             logger.error(f"Error in get_user_statistics: {e}")
             return None
 
-"""
-VOCABULARY BATTLE BOT - DATABASE QUERIES PART 2
-=============================================
+    """
+    VOCABULARY BATTLE BOT - DATABASE QUERIES PART 2
+    =============================================
 
-This file contains vocabulary data management queries (books, topics, words).
-Each query includes complete documentation with parameters and return values.
+    This file contains vocabulary data management queries (books, topics, words).
+    Each query includes complete documentation with parameters and return values.
 
-Author: Vocabulary Battle Bot Team
-Version: 3.0
-Last Updated: 2025
-"""
+    Author: Vocabulary Battle Bot Team
+    Version: 3.0
+    Last Updated: 2025
+    """
 
     # ==================== BOOK MANAGEMENT QUERIES ====================
     
@@ -511,7 +511,7 @@ Last Updated: 2025
             async with aiosqlite.connect(self.db_path) as db:
                 cursor = await db.execute("""
                     SELECT b.id, b.title, b.description, b.total_words, b.created_at,
-                           COUNT(t.id) as topic_count
+                        COUNT(t.id) as topic_count
                     FROM books b
                     LEFT JOIN topics t ON b.id = t.book_id
                     GROUP BY b.id, b.title, b.description, b.total_words, b.created_at
@@ -544,7 +544,7 @@ Last Updated: 2025
         
         Returns: dict or None
         - Success: {'id': int, 'title': str, 'description': str, 'total_words': int, 
-                   'topic_count': int, 'created_at': str}
+                'topic_count': int, 'created_at': str}
         - Not found: None
         
         Usage: book = await db.get_book_by_id(1)
@@ -553,7 +553,7 @@ Last Updated: 2025
             async with aiosqlite.connect(self.db_path) as db:
                 cursor = await db.execute("""
                     SELECT b.id, b.title, b.description, b.total_words, b.created_at,
-                           COUNT(t.id) as topic_count
+                        COUNT(t.id) as topic_count
                     FROM books b
                     LEFT JOIN topics t ON b.id = t.book_id
                     WHERE b.id = ?
@@ -752,8 +752,8 @@ Last Updated: 2025
     # ==================== WORD MANAGEMENT QUERIES ====================
     
     async def create_word(self, topic_id: int, uzbek: str, translation: str, 
-                         word_photo: str = None, note: str = None, 
-                         word_order: int = None, difficulty_level: int = 1) -> Optional[Dict]:
+                        word_photo: str = None, note: str = None, 
+                        word_order: int = None, difficulty_level: int = 1) -> Optional[Dict]:
         """
         Create a new word in a topic
         
@@ -768,7 +768,7 @@ Last Updated: 2025
         
         Returns: dict or None
         - Success: {'id': int, 'topic_id': int, 'uzbek': str, 'translation': str, 
-                   'word_photo': str, 'note': str, 'word_order': int, 'difficulty_level': int}
+                'word_photo': str, 'note': str, 'word_order': int, 'difficulty_level': int}
         - Failure: None
         
         Usage: word = await db.create_word(1, "kitob", "book", None, "Used for reading")
@@ -871,7 +871,7 @@ Last Updated: 2025
         
         Returns: dict or None
         - Success: {'id': int, 'topic_id': int, 'uzbek': str, 'translation': str, 
-                   'word_photo': str, 'note': str, 'word_order': int, 'difficulty_level': int}
+                'word_photo': str, 'note': str, 'word_order': int, 'difficulty_level': int}
         - Not found: None
         
         Usage: word = await db.get_word_by_id(1)
@@ -949,7 +949,7 @@ Last Updated: 2025
         Parameters:
         - word_id: int - Word ID (required)
         - **kwargs: Any word field to update (uzbek, translation, word_photo, note, 
-                   word_order, difficulty_level)
+                word_order, difficulty_level)
         
         Returns: bool - Success status
         
@@ -1111,7 +1111,7 @@ Last Updated: 2025
                 placeholders = ','.join('?' * len(word_ids))
                 cursor = await db.execute(f"""
                     SELECT w.id, w.uzbek, w.translation, w.word_photo,
-                           wd.distractor_1, wd.distractor_2, wd.distractor_3
+                        wd.distractor_1, wd.distractor_2, wd.distractor_3
                     FROM words w
                     LEFT JOIN word_distractors wd ON w.id = wd.word_id
                     WHERE w.id IN ({placeholders})

@@ -76,3 +76,26 @@ def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔙 Back to Main", callback_data="back_to_main")]
     ])
     return keyboard
+
+# New keyboard function for battle results
+def get_battle_results_keyboard(current_user_id: int, opponent_id: int, scope_display: str):
+    """Create keyboard with Re-battle and Back options"""
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Re-battle", callback_data=f"rebattle_{current_user_id}_{opponent_id}_{scope_display}")],
+        [InlineKeyboardButton("🏠 Back to Main", callback_data="back_to_main")]
+    ])
+    return keyboard
+
+def acc_rebattle_btn(request_id):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Accept", callback_data=f"accept_rebattle_{request_id}")],
+        [InlineKeyboardButton("❌ Decline", callback_data=f"decline_rebattle_{request_id}")]
+    ])
+    return keyboard
+
+def dec_rebattle_btn(request_id):
+    keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel Request", callback_data=f"cancel_rebattle_{request_id}")],
+                [InlineKeyboardButton("🏠 Back to Main", callback_data="back_to_main")]
+            ])
+    return keyboard

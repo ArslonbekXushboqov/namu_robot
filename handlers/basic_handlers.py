@@ -11,11 +11,11 @@ from aiogram.filters.command import CommandObject
 from keyboards.inline import get_main_menu_keyboard
 from strings.messages import Messages
 from utils.states import clear_user_session
-from database.queries import DatabaseManager
+from database.queries import VocabularyBattleDB
 from config.settings import settings
 
 router = Router()
-db = DatabaseManager(settings.DATABASE_PATH)
+db = VocabularyBattleDB(settings.DATABASE_PATH)
 
 @router.message(CommandStart(deep_link=True))
 async def start_handler(message: Message, command: CommandObject, state: FSMContext):

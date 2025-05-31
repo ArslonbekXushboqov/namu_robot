@@ -40,7 +40,7 @@ async def main():
     # Validate settings
     settings.validate()
     
-    db_ok = test_database_connection()
+    db_ok = await test_database_connection()
     print(db_ok)
     # Initialize bot and dispatcher
     bot = Bot(
