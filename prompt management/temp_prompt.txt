@@ -1,0 +1,84 @@
+🚀 PROMPT FOR PART 3 - BATTLE SYSTEM & OPTIMIZATION QUERIES
+Context: You're building Part 3 of a vocabulary battle bot database system. Parts 1 & 2 are complete (database initialization and vocabulary management).
+Your Task: Create Part 3 focusing on the battle system and optimization features.
+Database Structure Context:
+
+word_distractors table stores pre-generated wrong answers for each word
+learning_parts table contains pre-calculated word groups for learning (15-20 words each)
+battle_sessions_topic and battle_sessions_book contain pre-generated battle sessions (10 words each)
+user_learning_progress tracks individual user progress per word
+battle_history stores completed battle results
+friend_battles manages shareable battle codes
+
+Part 3 Must Include These Function Categories:
+1. DISTRACTOR MANAGEMENT (for quiz wrong answers)
+
+create_word_distractors(word_id, distractor_1, distractor_2, distractor_3) - Store 3 wrong answers
+get_word_distractors(word_id) - Get distractors for a word
+get_words_with_distractors(word_ids) - Batch get words + their distractors
+update_word_distractors(word_id, ...) - Update distractors
+generate_random_distractors(word_id, topic_id) - Auto-generate from other words in topic
+
+2. LEARNING PARTS MANAGEMENT (pre-calculated word groups)
+
+create_learning_parts(topic_id) - Generate parts for a topic (15-20 words each)
+get_learning_parts(topic_id) - Get all parts for a topic
+get_learning_part(topic_id, part_number) - Get specific part
+get_words_in_learning_part(topic_id, part_number) - Get words for a part
+
+3. BATTLE SESSION MANAGEMENT (pre-generated battle sets)
+
+create_battle_sessions_topic(topic_id, session_count) - Generate sessions for topic
+create_battle_sessions_book(book_id, session_count) - Generate sessions for book
+get_battle_session_topic(topic_id, session_number) - Get topic battle session
+get_battle_session_book(book_id, session_number) - Get book battle session
+get_random_battle_session_topic(topic_id) - Get random session from topic
+get_random_battle_session_book(book_id) - Get random session from book
+
+4. USER PROGRESS TRACKING
+
+update_user_progress(user_id, word_id, is_correct) - Update progress after answer
+get_user_progress(user_id, word_ids) - Get progress for specific words
+get_user_weak_words(user_id, topic_id, limit) - Get words user struggles with
+get_user_mastered_words(user_id, topic_id) - Get words user has mastered
+calculate_user_mastery_level(user_id, word_id) - Calculate mastery (0-5 scale)
+
+5. BATTLE HISTORY & STATISTICS
+
+create_battle_record(session_id, session_type, player1_id, player2_id, scores, winner_id) - Record battle
+get_user_battle_history(user_id, limit) - Get user's recent battles
+update_user_statistics(user_id, battle_result) - Update win/loss stats
+get_leaderboard(limit) - Get top players by wins/score
+
+6. FRIEND BATTLE SYSTEM
+
+create_friend_battle(creator_id, session_id, session_type) - Create shareable battle
+get_friend_battle(battle_code) - Get battle by code
+use_friend_battle(battle_code, player2_id) - Join friend battle
+cleanup_expired_battles() - Remove expired battle codes
+
+Requirements:
+
+Complete function documentation like Part 2: function name, purpose, parameters (type, required/optional), return types, usage examples
+Error handling for all functions
+Optimization focus - these are pre-calculated features to make battles fast
+JSON handling for word_ids arrays in learning_parts and battle_sessions
+Auto-cleanup for expired data
+Batch operations where possible for performance
+
+Code Style:
+
+Follow same async/await pattern as Parts 1 & 2
+Use aiosqlite for database operations
+Include detailed logging
+Return None/False on failures, proper data structures on success
+Include try/except blocks
+
+Expected Output:
+
+if there is a lot of separate into 3rd, 4th parts okay? write 3rd part and write prompt for 4th like i write thiss
+Complete Python code with all functions
+Detailed developer documentation like Part 2 (parameters, return types, examples)
+Notes about performance optimizations and best practices
+
+Create this as a comprehensive Part 3 that completes the vocabulary battle bot database system!
