@@ -57,7 +57,7 @@ def get_battle_question_keyboard(options: List[str]) -> InlineKeyboardMarkup:
     buttons = []
     for i, option in enumerate(options):
         buttons.append([InlineKeyboardButton(
-            text=f"{chr(65+i)}. {option}", 
+            text=f"{option}", 
             callback_data=f"answer_{i}"
         )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

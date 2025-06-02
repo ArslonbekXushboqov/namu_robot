@@ -93,7 +93,7 @@ class BattleHistoryDB:
             logger.error(f"Error updating battle {battle_code}: {e}")
             raise
     
-    async def get_battle_by_code(self, battle_code: str) -> Optional[Dict[str, Any]]:
+    async def get_battle_by_code(self, battle_code: int) -> Optional[Dict[str, Any]]:
         """Get battle details by battle code"""
         try:
             async with aiosqlite.connect(self.db_path) as db:
