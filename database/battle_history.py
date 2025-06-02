@@ -2,6 +2,7 @@ import aiosqlite
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import time
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class BattleHistoryDB:
             )
         """)
 
-        self.logger.info("Battle history database initialized with indexes")
+        logger.info("Battle history database initialized with indexes")
     
     def generate_battle_code(self) -> str:
         """Generate a unique battle code"""
@@ -60,11 +61,11 @@ class BattleHistoryDB:
                 """, (battle_code, session_id, session_type, player1_id, player2_id))
                 
                 await db.commit()
-                self.logger.info(f"Battle created: {battle_code}")
+                logger.info(f"Battle created: {battle_code}")
                 return battle_code
                 
         except Exception as e:
-            self.logger.error(f"Error creating battle: {e}")
+            logger.error(f"Error creating battle: {e}")
             raise
     
     async def update_battle_result(self, battle_code: str, winner_id: Optional[int],
@@ -82,14 +83,14 @@ class BattleHistoryDB:
                 await db.commit()
                 
                 if cursor.rowcount > 0:
-                    self.logger.info(f"Battle {battle_code} updated with results")
+                    logger.info(f"Battle {battle_code} updated with results")
                     return True
                 else:
-                    self.logger.warning(f"Battle {battle_code} not found for update")
+                    logger.warning(f"Battle {battle_code} not found for update")
                     return False
                     
         except Exception as e:
-            self.logger.error(f"Error updating battle {battle_code}: {e}")
+            logger.error(f"Error updating battle {battle_code}: {e}")
             raise
     
     async def get_battle_by_code(self, battle_code: str) -> Optional[Dict[str, Any]]:
@@ -107,7 +108,7 @@ class BattleHistoryDB:
                 return None
                 
         except Exception as e:
-            self.logger.error(f"Error getting battle {battle_code}: {e}")
+            logger.error(f"Error getting battle {battle_code}: {e}")
             raise
     
     async def get_player_battles(self, player_id: int, limit: int = 50) -> List[Dict[str, Any]]:
@@ -126,7 +127,7 @@ class BattleHistoryDB:
                 return [dict(row) for row in rows]
                 
         except Exception as e:
-            self.logger.error(f"Error getting battles for player {player_id}: {e}")
+            logger.error(f"Error getting battles for player {player_id}: {e}")
             raise
     
     async def get_session_battles(self, session_id: int) -> List[Dict[str, Any]]:
@@ -144,7 +145,7 @@ class BattleHistoryDB:
                 return [dict(row) for row in rows]
                 
         except Exception as e:
-            self.logger.error(f"Error getting battles for session {session_id}: {e}")
+            logger.error(f"Error getting battles for session {session_id}: {e}")
             raise
     
     async def get_player_stats(self, player_id: int) -> Dict[str, Any]:
@@ -190,7 +191,7 @@ class BattleHistoryDB:
                 }
                 
         except Exception as e:
-            self.logger.error(f"Error getting stats for player {player_id}: {e}")
+            logger.error(f"Error getting stats for player {player_id}: {e}")
             raise
     
     async def get_recent_battles(self, limit: int = 20) -> List[Dict[str, Any]]:
@@ -208,7 +209,7 @@ class BattleHistoryDB:
                 return [dict(row) for row in rows]
                 
         except Exception as e:
-            self.logger.error(f"Error getting recent battles: {e}")
+            logger.error(f"Error getting recent battles: {e}")
             raise
     
     async def delete_battle(self, battle_code: str) -> bool:
@@ -222,14 +223,14 @@ class BattleHistoryDB:
                 await db.commit()
                 
                 if cursor.rowcount > 0:
-                    self.logger.info(f"Battle {battle_code} deleted")
+                    logger.info(f"Battle {battle_code} deleted")
                     return True
                 else:
-                    self.logger.warning(f"Battle {battle_code} not found for deletion")
+                    logger.warning(f"Battle {battle_code} not found for deletion")
                     return False
                     
         except Exception as e:
-            self.logger.error(f"Error deleting battle {battle_code}: {e}")
+            logger.error(f"Error deleting battle {battle_code}: {e}")
             raise
     
     async def get_head_to_head(self, player1_id: int, player2_id: int) -> Dict[str, Any]:
@@ -260,5 +261,5 @@ class BattleHistoryDB:
                 }
                 
         except Exception as e:
-            self.logger.error(f"Error getting head-to-head for players {player1_id} vs {player2_id}: {e}")
+            logger.error(f"Error getting head-to-head for players {player1_id} vs {player2_id}: {e}")
             raise

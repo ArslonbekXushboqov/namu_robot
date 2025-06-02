@@ -33,7 +33,8 @@ class VocabularyBattleDB(PendingRequestsDB, BattleHistoryDB, BattleSessionDB):
                 # Create all tables
                 await self._create_pending_requests_tables(db)
                 await self._create_battle_session_tables(db)
-                
+                await self._create_battle_history(db)
+
                 await self._create_indexes(db)
                 
                 # CRITICAL: Add this commit
@@ -92,7 +93,9 @@ class VocabularyBattleDB(PendingRequestsDB, BattleHistoryDB, BattleSessionDB):
             # "CREATE INDEX IF NOT EXISTS idx_user_progress_word ON user_learning_progress(word_id)",
             # "CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id)",
             "CREATE INDEX IF NOT EXISTS idx_battle_history_players ON battle_history(player1_id, player2_id)",
-            "CREATE INDEX IF NOT EXISTS idx_friend_battles_code ON friend_battles(battle_code)"
+            "CREATE INDEX IF NOT EXISTS idx_friend_battles_code ON friend_battles(battle_code)",
+            "CREATE INDEX IF NOT EXISTS idx_pending_random_battle_config ON pending_random_requests(battle_config)",
+            "CREATE INDEX IF NOT EXISTS idx_pending_random_player_id ON pending_random_requests(player_id)"
         ]
         
         for index in indexes:

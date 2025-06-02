@@ -12,6 +12,6 @@ router = Router()
 # - Answer processing
 # - Battle completion
 
-def register_battle_handlers(dp):
+def register_battle_handlers(dp, bot):
     """Register battle handlers"""
     dp.include_router(router)

@@ -84,10 +84,10 @@ async def cancel_handler(message: Message, state: FSMContext):
 async def unknown_message_handler(message: Message):
     """Handle unknown text messages"""
     await message.answer(
-        "🤔 I don't understand that command.\n\n" + Messages.MAIN_MENU,
+        Messages.MAIN_MENU,
         reply_markup=get_main_menu_keyboard()
     )
 
-def register_basic_handlers(dp):
+def register_basic_handlers(dp, bot):
     """Register basic handlers"""
     dp.include_router(router)

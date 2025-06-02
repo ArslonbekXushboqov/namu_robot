@@ -7,6 +7,8 @@ import time
 import json
 import random
 
+from json_maker import create_pretty_json
+
 from keyboards.inline import (
     get_main_menu_keyboard, get_battle_type_keyboard, 
     get_book_selection_keyboard, get_scope_selection_keyboard,
@@ -133,7 +135,7 @@ async def book_selection_handler(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
 @router.callback_query(F.data.in_(["scope_book", "scope_topic"]))
-async def scope_selection_handler(callback: CallbackQuery, state: FSMContext):
+async def scope_selection_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Handle scope selection"""
     scope = callback.data.split("_")[1]
     
@@ -142,7 +144,7 @@ async def scope_selection_handler(callback: CallbackQuery, state: FSMContext):
     
     if scope == "book":
         # Battle with entire book - start battle creation
-        await create_battle_session(callback, state, session)
+        await create_battle_session(callback, state, session, bot)
     else:
         # Battle with specific topic - show topic selection
         await state.set_state(BattleStates.waiting_for_topic_selection)
@@ -174,7 +176,7 @@ async def scope_selection_handler(callback: CallbackQuery, state: FSMContext):
             await callback.answer()
 
 @router.callback_query(F.data.startswith("select_topic_"))
-async def topic_selection_handler(callback: CallbackQuery, state: FSMContext):
+async def topic_selection_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Handle topic selection"""
     topic_id = int(callback.data.split("_")[-1])
     
@@ -182,9 +184,9 @@ async def topic_selection_handler(callback: CallbackQuery, state: FSMContext):
     session.selected_topic_id = topic_id
     
     # Now create battle session
-    await create_battle_session(callback, state, session)
+    await create_battle_session(callback, state, session, bot)
 
-async def create_battle_session(callback: CallbackQuery, state: FSMContext, session):
+async def create_battle_session(callback: CallbackQuery, state: FSMContext, session, bot: Bot):
     """Create battle session based on user choices"""
     try:
         # Get battle session from database
@@ -201,7 +203,6 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
             scope_display = f"📝 Topic: {topic['title']}"
             battle_config = f"topic_{session.selected_topic_id}"
         
-        await callback.message.answer(f"`{battle_config}`")
 
         if not battle_session:
             await callback.message.edit_text(
@@ -215,6 +216,7 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
             # Try to find waiting opponent with same configuration
             check_if_opponent_av = await db.get_random_opponent(requesting_player_id=callback.from_user.id, battle_config=battle_config)
             if check_if_opponent_av:
+                await callback.message.delete()
                 # Found opponent! Start battle immediately
                 opponent_data = check_if_opponent_av
                 opponent_id = opponent_data[1]
@@ -240,8 +242,7 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
                         'msg_id': opponent_message_id
                     }
                 }
-
-                await start_battle_for_players(msg_user_data, battle_session, battle_id, scope_display)
+                await start_battle_for_players(msg_user_data, battle_session, battle_id, scope_display, bot)
                 
             else:
                 # # No opponent found, add to waiting list
@@ -253,7 +254,6 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
                 # }
 
                 await db.add_pending_request(player_id=callback.from_user.id, message_id=callback.message.message_id, battle_config=battle_config)
-                await callback.message.answer(f"`{battle_session}`")
 
                 await state.set_state(BattleStates.waiting_for_opponent)
                 await callback.message.edit_text(
@@ -283,7 +283,7 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
         await callback.answer()
 
 async def start_battle_for_players(msg_data: dict, 
-                                 battle_session: dict, battle_id: int, scope_display: str):
+                                 battle_session: dict, battle_id: int, scope_display: str, bot: Bot):
     """Start battle for both players"""
     try:
         # Get words with distractors for battle
@@ -310,26 +310,32 @@ async def start_battle_for_players(msg_data: dict,
             return
         
         player1 = msg_data['player1']['user_id']
-        player1 = msg_data['player2']['user_id']
+        player2 = msg_data['player2']['user_id']
 
-        message1 = await bot.send_message(chat_id=player1, text="blaa")
-        message3 = await bot.send_message(chat_id=player2, text="bla22a")
+        # Send battle start message to both players
+        start_message = Messages.BATTLE_STARTING.format(
+            book_title=scope_display,
+            scope=scope_display
+        )
 
+        message_1 = await bot.send_message(chat_id=player1, text=start_message)
+        message_2 = await bot.send_message(chat_id=player2, text=start_message)
+        
         # Store battle data
         battle_data = {
             "questions": questions[:10],  # Take exactly 10 questions
             "players": {
                 player1: {
-                    "message": message1,
+                    "message": message_1,
                     "answers": [],
-                    "start_time": time.time(),
+                    "start_time": None,  # Will be set when countdown finishes
                     "current_question": 0,
                     "completed": False
                 },
                 player2: {
-                    "message": message2,
+                    "message": message_2,
                     "answers": [],
-                    "start_time": time.time(),
+                    "start_time": None,  # Will be set when countdown finishes
                     "current_question": 0,
                     "completed": False
                 }
@@ -341,29 +347,47 @@ async def start_battle_for_players(msg_data: dict,
         active_battles[battle_id] = battle_data
         
         # Update user sessions
-        session1 = get_user_session(callback1.from_user.id)
+        session1 = get_user_session(message_1.chat.id)
         session1.current_battle_id = battle_id
-        session1.start_time = time.time()
         
-        session2 = get_user_session(callback2.from_user.id)
+        session2 = get_user_session(message_2.chat.id)
         session2.current_battle_id = battle_id
-        session2.start_time = time.time()
         
-        # Send battle start message to both players
-        start_message = Messages.BATTLE_STARTING.format(
-            book_title=scope_display,
-            scope=scope_display,
-            player1_name=callback1.from_user.first_name,
-            player2_name=callback2.from_user.first_name
+        # Countdown sequence with simultaneous updates
+        countdown_messages = ["3", "2", "1", "GO! 🚀"]
+        await asyncio.sleep(1.5)
+        for countdown_text in countdown_messages:
+            await asyncio.sleep(1)  # 1 second between each countdown
+            
+            # Update both messages simultaneously
+            await asyncio.gather(
+                bot.edit_message_text(
+                    text=countdown_text,
+                    chat_id=message_1.chat.id,
+                    message_id=message_1.message_id
+                ),
+                bot.edit_message_text(
+                    text=countdown_text,
+                    chat_id=message_2.chat.id,
+                    message_id=message_2.message_id
+                )
+            )
+        
+        # Set the actual start time after countdown
+        current_time = time.time()
+        battle_data["players"][player1]["start_time"] = current_time
+        battle_data["players"][player2]["start_time"] = current_time
+        
+        # Update sessions with start time
+        session1.start_time = current_time
+        session2.start_time = current_time
+        
+        # Small delay after "GO!" then send first question immediately
+        await asyncio.sleep(0.5)
+        await asyncio.gather(
+            send_question_to_player(message_1.chat.id, battle_id, 0),
+            send_question_to_player(message_2.chat.id, battle_id, 0)
         )
-        
-        await callback1.message.edit_text(start_message)
-        await callback2.message.edit_text(start_message)
-        
-        # Wait a moment then send first question
-        await asyncio.sleep(2)
-        await send_question_to_player(callback1.from_user.id, battle_id, 0)
-        await send_question_to_player(callback2.from_user.id, battle_id, 0)
         
     except Exception as e:
         logger.error(f"Error starting battle: {e}")
@@ -399,8 +423,9 @@ async def send_question_to_player(user_id: int, battle_id: int, question_index: 
             uzbek_word=question["uzbek"]
         )
         
-        callback = player_data["callback"]
-        await callback.message.edit_text(
+        # Use the stored message object instead of callback
+        message = player_data["message"]
+        await message.edit_text(
             question_text,
             reply_markup=get_battle_question_keyboard(options)
         )
@@ -410,8 +435,8 @@ async def send_question_to_player(user_id: int, battle_id: int, question_index: 
 
 @router.callback_query(F.data.startswith("answer_"))
 async def answer_handler(callback: CallbackQuery, state: FSMContext):
-        """Handle battle answer"""
-    # try:
+    """Handle battle answer"""
+    try:
         answer_index = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
         
@@ -485,75 +510,105 @@ async def answer_handler(callback: CallbackQuery, state: FSMContext):
             # Send next question
             await send_question_to_player(user_id, battle_id, player_data["current_question"])
         
-    # except Exception as e:
-    #     logger.error(f"Error handling answer: {e}")
-    #     await callback.answer("Error processing answer!")
+    except Exception as e:
+        logger.error(f"Error handling answer: {e}")
+        await callback.answer("Error processing answer!")
 
 async def show_battle_results(battle_data: dict):
-        """Show battle results to both players"""
-    # try:
+    """Show battle results to both players"""
+    try:
         players = list(battle_data["players"].items())
         player1_id, player1_data = players[0]
         player2_id, player2_data = players[1]
-        
+        battle_id = battle_data["battle_id"]
+
         # Calculate scores
         player1_score = sum(1 for ans in player1_data["answers"] if ans["is_correct"])
         player2_score = sum(1 for ans in player2_data["answers"] if ans["is_correct"])
-        
-        # Update battle result in database (you'll need to implement this)
-        # await db.update_battle_result(battle_data["battle_id"], player1_score, player2_score)
-        
+
+        # Get completion times
+        player1_completion_time = player1_data["completion_time"]  # Should be time.time() - start_time
+        player2_completion_time = player2_data["completion_time"]  # Should be time.time() - start_time
+
         # Determine winner
         if player1_score > player2_score:
-            winner_name = player1_data["callback"].from_user.first_name
+            # Player 1 has higher score
+            winner_id = player1_id
+            winner_name = player1_data["message"].chat.first_name
         elif player2_score > player1_score:
-            winner_name = player2_data["callback"].from_user.first_name
+            # Player 2 has higher score
+            winner_id = player2_id
+            winner_name = player2_data["message"].chat.first_name
+        elif player1_score == player2_score:
+            # Same score - determine by completion time (faster wins)
+            if player1_completion_time < player2_completion_time:
+                # Player 1 completed faster
+                winner_id = player1_id
+                winner_name = player1_data["message"].chat.first_name
+            elif player2_completion_time < player1_completion_time:
+                # Player 2 completed faster
+                winner_id = player2_id
+                winner_name = player2_data["message"].chat.first_name
+            else:
+                # Exact same score and completion time (very rare)
+                winner_id = None
+                winner_name = "Draw!"
         else:
+            # This shouldn't happen, but handle as draw
+            winner_id = None
             winner_name = "Draw!"
+        # Update battle result in database (you'll need to implement this)
+        await db.update_battle_result(
+            battle_code = battle_id, 
+            winner_id = winner_id, 
+            player1_score = player1_score, 
+            player2_score = player2_score
+            )
         
         # Create results message
         results_message = Messages.BATTLE_COMPLETED.format(
-            player1_name=player1_data["callback"].from_user.first_name,
+            player1_name=player1_data["message"].chat.first_name,
             player1_score=player1_score,
             player1_time=f"{player1_data['completion_time']:.1f}",
-            player2_name=player2_data["callback"].from_user.first_name,
+            player2_name=player2_data["message"].chat.first_name,
             player2_score=player2_score,
             player2_time=f"{player2_data['completion_time']:.1f}",
             winner_name=winner_name
         )
         
         # Send results to both players
-        await player1_data["callback"].message.edit_text(
+        await player1_data["message"].edit_text(
             results_message,
-            reply_markup=get_battle_results_keyboard(player1_id, player2_id, battle_data["scope_display"])
+            reply_markup=get_battle_results_keyboard(player1_id, player2_id, battle_id)
         )
-        await player2_data["callback"].message.edit_text(
+        await player2_data["message"].edit_text(
             results_message,
-            reply_markup=get_battle_results_keyboard(player2_id, player1_id, battle_data["scope_display"])
+            reply_markup=get_battle_results_keyboard(player2_id, player1_id, battle_id)
         )
         
         # Clean up battle data
-        del active_battles[battle_data["battle_id"]]
+        del active_battles[battle_id]
         
-    # except Exception as e:
-    #     logger.error(f"Error showing results: {e}")
+    except Exception as e:
+        logger.error(f"Error showing results: {e}")
 
 @router.callback_query(F.data == "my_stats")
 async def my_stats_handler(callback: CallbackQuery):
     """Handle stats viewing"""
     try:
         # You'll need to implement get_user_battle_stats in your database
-        # stats = await db.get_user_battle_stats(callback.from_user.id)
-        
+        stats = await db.get_player_stats(callback.from_user.id)
+        # example = {
+        #     'player_id': player_id,
+        #     'total_battles': total_battles,
+        #     'wins': wins,
+        #     'losses': total_battles - wins,
+        #     'win_rate': round(win_rate, 2),
+        #     'average_score': round(scores[0] or 0, 2),
+        #     'average_opponent_score': round(scores[1] or 0, 2)
+        # }
         # Temporary mock stats
-        stats = {
-            "total_battles": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0,
-            "avg_score": 0.0
-        }
-        
+
         if stats["total_battles"] == 0:
             stats_message = "📊 **Your Statistics**\n\nNo battles completed yet.\nStart your first battle to see stats!"
         else:
@@ -563,7 +618,7 @@ async def my_stats_handler(callback: CallbackQuery):
 🏆 **Wins:** {stats['wins']}
 ❌ **Losses:** {stats['losses']}
 📈 **Win Rate:** {stats['win_rate']:.1f}%
-⭐ **Average Score:** {stats['avg_score']}/10
+⭐ **Average Score:** {stats['average_score']}/10
 """
         
         await callback.message.edit_text(
@@ -660,7 +715,7 @@ async def back_to_scope_selection_handler(callback: CallbackQuery, state: FSMCon
         logger.error(f"Error in back to scope selection: {e}")
         await callback.answer("Error occurred!")
 
-def register_callback_handlers(dp):
+def register_callback_handlers(dp, bot):
     """Register callback handlers"""
     dp.include_router(router)
 

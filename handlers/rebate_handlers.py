@@ -292,6 +292,6 @@ async def cleanup_expired_rebattle_requests():
     return len(expired_requests)
 
 
-def register_basic_handlers(dp):
+def register_basic_handlers(dp, bot):
     """Register basic handlers"""
     dp.include_router(router)

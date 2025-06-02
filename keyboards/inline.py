@@ -78,12 +78,12 @@ def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 # New keyboard function for battle results
-def get_battle_results_keyboard(current_user_id: int, opponent_id: int, scope_display: str) -> InlineKeyboardMarkup:
+def get_battle_results_keyboard(current_user_id: int, opponent_id: int, battle_id: int) -> InlineKeyboardMarkup:
     """Create keyboard with Re-battle and Back options"""
-    len_data = len(f"rebattle_{current_user_id}_{opponent_id}_{scope_display}".encode('utf-8'))
-    print(len_data)
+    # len_data = len(f"rebattle_{current_user_id}_{opponent_id}_{battle_id}".encode('utf-8'))
+    # print(len_data)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Re-battle", callback_data=f"rebattle_{current_user_id}_{opponent_id}_{scope_display}")],
+        [InlineKeyboardButton(text="🔄 Re-battle", callback_data=f"rebattle_{current_user_id}_{opponent_id}_{battle_id}")],
         [InlineKeyboardButton(text="🏠 Back to Main", callback_data="back_to_main")]
     ])
 
