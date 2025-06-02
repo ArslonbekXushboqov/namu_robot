@@ -78,24 +78,36 @@ def get_back_to_main_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 # New keyboard function for battle results
-def get_battle_results_keyboard(current_user_id: int, opponent_id: int, scope_display: str):
+def get_battle_results_keyboard(current_user_id: int, opponent_id: int, scope_display: str) -> InlineKeyboardMarkup:
     """Create keyboard with Re-battle and Back options"""
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Re-battle", callback_data=f"rebattle_{current_user_id}_{opponent_id}_{scope_display}")],
-        [InlineKeyboardButton("🏠 Back to Main", callback_data="back_to_main")]
+    len_data = len(f"rebattle_{current_user_id}_{opponent_id}_{scope_display}".encode('utf-8'))
+    print(len_data)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Re-battle", callback_data=f"rebattle_{current_user_id}_{opponent_id}_{scope_display}")],
+        [InlineKeyboardButton(text="🏠 Back to Main", callback_data="back_to_main")]
+    ])
+
+    return keyboard
+
+def acc_rebattle_btn(request_id) -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Accept", callback_data=f"accept_rebattle_{request_id}")],
+        [InlineKeyboardButton(text="❌ Decline", callback_data=f"decline_rebattle_{request_id}")]
     ])
     return keyboard
 
-def acc_rebattle_btn(request_id):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Accept", callback_data=f"accept_rebattle_{request_id}")],
-        [InlineKeyboardButton("❌ Decline", callback_data=f"decline_rebattle_{request_id}")]
-    ])
-    return keyboard
-
-def dec_rebattle_btn(request_id):
-    keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel Request", callback_data=f"cancel_rebattle_{request_id}")],
-                [InlineKeyboardButton("🏠 Back to Main", callback_data="back_to_main")]
+def dec_rebattle_btn(request_id) -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Cancel Request", callback_data=f"cancel_rebattle_{request_id}")],
+                [InlineKeyboardButton(text="🏠 Back to Main", callback_data="back_to_main")]
             ])
+    return keyboard
+
+def get_scope_selection_keyboard() -> InlineKeyboardMarkup:
+    """Choose battle scope: all book or specific topic"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 All Vocabularies", callback_data="scope_book")],
+        [InlineKeyboardButton(text="📝 Specific Topic", callback_data="scope_topic")],
+        [InlineKeyboardButton(text="🔙 Back", callback_data="back_to_book_selection")]
+    ])
     return keyboard

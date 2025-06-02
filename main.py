@@ -8,6 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config.settings import settings
 from handlers import setup_handlers
 
+from database.queries import VocabularyBattleDB
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -18,19 +19,16 @@ logger = logging.getLogger(__name__)
 async def test_database_connection():
     """Test database connection on startup"""
     try:
-        db = DatabaseManager(settings.DATABASE_PATH)
-        tester = DatabaseTester()
-        
-        logger.info("Testing database connection...")
-        success = await tester.test_basic_queries(db)
-        
-        if success:
-            logger.info("✅ Database connection successful!")
-            return True
-        else:
-            logger.error("❌ Database test failed!")
-            return False
-            
+        db = VocabularyBattleDB("vocabulary.db")
+
+        # Check connection status
+        connection_ok = await db.check_database_connection()
+
+        # Initialize database (your existing method with better logging)
+        init_ok = await db.init_database()
+
+        # Test basic operations
+        test_ok = await db.test_simple_operation()    
     except Exception as e:
         logger.error(f"❌ Database connection error: {e}")
         return False
@@ -39,9 +37,7 @@ async def main():
     """Initialize and start the bot"""
     # Validate settings
     settings.validate()
-    
-    db_ok = await test_database_connection()
-    print(db_ok)
+    await test_database_connection()
     # Initialize bot and dispatcher
     bot = Bot(
         token=settings.BOT_TOKEN,

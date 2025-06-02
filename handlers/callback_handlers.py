@@ -1,7 +1,3 @@
-# handlers/callback_handlers.py
-"""
-Enhanced callback handlers with full database integration
-"""
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -205,6 +201,8 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
             scope_display = f"📝 Topic: {topic['title']}"
             battle_config = f"topic_{session.selected_topic_id}"
         
+        await callback.message.answer(f"`{battle_config}`")
+
         if not battle_session:
             await callback.message.edit_text(
                 Messages.BATTLE_SESSION_ERROR,
@@ -215,29 +213,48 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
         
         if session.battle_type == "random":
             # Try to find waiting opponent with same configuration
-            if battle_config in waiting_battles:
+            check_if_opponent_av = await db.get_random_opponent(requesting_player_id=callback.from_user.id, battle_config=battle_config)
+            if check_if_opponent_av:
                 # Found opponent! Start battle immediately
-                opponent_data = waiting_battles[battle_config]
-                opponent_id = opponent_data["user_id"]
-                opponent_callback = opponent_data["callback"]
-                del waiting_battles[battle_config]
+                opponent_data = check_if_opponent_av
+                opponent_id = opponent_data[1]
+                opponent_message_id = opponent_data[2]
+                await db.remove_pending_request(player1_id=callback.from_user.id, player2_id=opponent_id)
                 
                 # Create battle record in database (you'll need to implement this)
-                # battle_id = await db.create_battle_record(battle_session["id"], callback.from_user.id, opponent_id)
-                battle_id = int(time.time() * 1000)  # Temporary battle ID
+                battle_id = await db.create_battle(
+                    session_id = battle_session["id"], 
+                    session_type = session.battle_scope, 
+                    player1_id = callback.from_user.id, 
+                    player2_id = opponent_id
+                    )
                 
                 # Start battle for both players
-                await start_battle_for_players(callback, opponent_callback, battle_session, battle_id, scope_display)
+                msg_user_data={
+                    'player1': {
+                        'user_id': callback.from_user.id,
+                        'msg_id': callback.message.message_id
+                    },
+                    'player2': {
+                        'user_id': opponent_id,
+                        'msg_id': opponent_message_id
+                    }
+                }
+
+                await start_battle_for_players(msg_user_data, battle_session, battle_id, scope_display)
                 
             else:
-                # No opponent found, add to waiting list
-                waiting_battles[battle_config] = {
-                    "user_id": callback.from_user.id,
-                    "callback": callback,
-                    "battle_session": battle_session,
-                    "scope_display": scope_display
-                }
-                
+                # # No opponent found, add to waiting list
+                # waiting_battles[battle_config] = {
+                #     "user_id": callback.from_user.id,
+                #     "callback": callback,
+                #     "battle_session": battle_session,
+                #     "scope_display": scope_display
+                # }
+
+                await db.add_pending_request(player_id=callback.from_user.id, message_id=callback.message.message_id, battle_config=battle_config)
+                await callback.message.answer(f"`{battle_session}`")
+
                 await state.set_state(BattleStates.waiting_for_opponent)
                 await callback.message.edit_text(
                     Messages.SEARCHING_OPPONENT,
@@ -265,7 +282,7 @@ async def create_battle_session(callback: CallbackQuery, state: FSMContext, sess
         )
         await callback.answer()
 
-async def start_battle_for_players(callback1: CallbackQuery, callback2: CallbackQuery, 
+async def start_battle_for_players(msg_data: dict, 
                                  battle_session: dict, battle_id: int, scope_display: str):
     """Start battle for both players"""
     try:
@@ -292,19 +309,25 @@ async def start_battle_for_players(callback1: CallbackQuery, callback2: Callback
             logger.error(f"Not enough questions with distractors: {len(questions)}")
             return
         
+        player1 = msg_data['player1']['user_id']
+        player1 = msg_data['player2']['user_id']
+
+        message1 = await bot.send_message(chat_id=player1, text="blaa")
+        message3 = await bot.send_message(chat_id=player2, text="bla22a")
+
         # Store battle data
         battle_data = {
             "questions": questions[:10],  # Take exactly 10 questions
             "players": {
-                callback1.from_user.id: {
-                    "callback": callback1,
+                player1: {
+                    "message": message1,
                     "answers": [],
                     "start_time": time.time(),
                     "current_question": 0,
                     "completed": False
                 },
-                callback2.from_user.id: {
-                    "callback": callback2,
+                player2: {
+                    "message": message2,
                     "answers": [],
                     "start_time": time.time(),
                     "current_question": 0,
@@ -387,8 +410,8 @@ async def send_question_to_player(user_id: int, battle_id: int, question_index: 
 
 @router.callback_query(F.data.startswith("answer_"))
 async def answer_handler(callback: CallbackQuery, state: FSMContext):
-    """Handle battle answer"""
-    try:
+        """Handle battle answer"""
+    # try:
         answer_index = int(callback.data.split("_")[1])
         user_id = callback.from_user.id
         
@@ -446,6 +469,7 @@ async def answer_handler(callback: CallbackQuery, state: FSMContext):
             
             if other_player["completed"]:
                 # Both completed - show results
+                # print(battle_data)
                 await show_battle_results(battle_data)
             else:
                 # Wait for other player
@@ -461,13 +485,13 @@ async def answer_handler(callback: CallbackQuery, state: FSMContext):
             # Send next question
             await send_question_to_player(user_id, battle_id, player_data["current_question"])
         
-    except Exception as e:
-        logger.error(f"Error handling answer: {e}")
-        await callback.answer("Error processing answer!")
+    # except Exception as e:
+    #     logger.error(f"Error handling answer: {e}")
+    #     await callback.answer("Error processing answer!")
 
 async def show_battle_results(battle_data: dict):
-    """Show battle results to both players"""
-    try:
+        """Show battle results to both players"""
+    # try:
         players = list(battle_data["players"].items())
         player1_id, player1_data = players[0]
         player2_id, player2_data = players[1]
@@ -511,8 +535,8 @@ async def show_battle_results(battle_data: dict):
         # Clean up battle data
         del active_battles[battle_data["battle_id"]]
         
-    except Exception as e:
-        logger.error(f"Error showing results: {e}")
+    # except Exception as e:
+    #     logger.error(f"Error showing results: {e}")
 
 @router.callback_query(F.data == "my_stats")
 async def my_stats_handler(callback: CallbackQuery):
@@ -640,269 +664,3 @@ def register_callback_handlers(dp):
     """Register callback handlers"""
     dp.include_router(router)
 
-#------------------------RE-BATTLE----------------------#
-
-# Global storage for re-battle requests
-pending_rebattle_requests = {}
-
-# Re-battle callback handlers for aiogram 3
-@router.callback_query(F.data.startswith('rebattle_request_'))
-async def handle_rebattle_request(callback: CallbackQuery):
-    """Handle re-battle request initiation"""
-    try:
-        # Parse: rebattle_request_requester_opponent_scope
-        data_parts = callback.data.split("_", 3)
-        if len(data_parts) < 4:
-            await callback.answer("❌ Invalid request format")
-            return
-        
-        requester_id = int(data_parts[2])
-        opponent_id = int(data_parts[3])
-        scope_display = data_parts[4] if len(data_parts) > 4 else "Unknown"
-        
-        # Validate requester
-        if callback.from_user.id != requester_id:
-            await callback.answer("❌ Unauthorized request")
-            return
-        
-        # Generate unique request ID
-        request_id = f"{requester_id}_{opponent_id}_{int(time.time())}"
-        
-        # Store the request
-        pending_rebattle_requests[request_id] = {
-            "requester_id": requester_id,
-            "opponent_id": opponent_id,
-            "scope_display": scope_display,
-            "requester_name": callback.from_user.first_name,
-            "timestamp": time.time()
-        }
-        
-        # Update requester's message
-        await callback.message.edit_text(
-            text="🔄 Re-battle request sent to your opponent!\nWaiting for response...",
-            reply_markup=get_rebattle_cancel_keyboard(request_id)
-        )
-        
-        # Send request to opponent
-        await send_rebattle_request_to_opponent(request_id)
-        await callback.answer("✅ Re-battle request sent!")
-        
-    except Exception as e:
-        logger.error(f"Error in rebattle request: {e}")
-        await callback.answer("❌ Error processing request")
-
-@router.callback_query(F.data.startswith('rebattle_accept_'))
-async def handle_rebattle_accept(callback: CallbackQuery):
-    """Handle re-battle acceptance"""
-    try:
-        request_id = callback.data.split("_", 2)[2]
-        
-        if request_id not in pending_rebattle_requests:
-            await callback.answer("❌ Request expired or invalid")
-            return
-        
-        request_data = pending_rebattle_requests[request_id]
-        requester_id = request_data["requester_id"]
-        opponent_id = request_data["opponent_id"]
-        scope_display = request_data["scope_display"]
-        
-        # Validate opponent
-        if callback.from_user.id != opponent_id:
-            await callback.answer("❌ Unauthorized action")
-            return
-        
-        # Clean up the request
-        del pending_rebattle_requests[request_id]
-        
-        # Create new battle session
-        new_battle_session = await create_new_battle_session(scope_display)
-        
-        if not new_battle_session:
-            await callback.message.edit_text(
-                text="❌ Unable to create new battle session. Please try again later.",
-                reply_markup=get_back_to_main_keyboard()
-            )
-            await callback.answer("❌ Failed to create battle session")
-            return
-        
-        # Generate new battle ID
-        new_battle_id = generate_battle_id()
-        
-        # Update opponent's message
-        await callback.message.edit_text(
-            text="✅ Re-battle accepted! Preparing new battle...",
-            reply_markup=None
-        )
-        
-        # Notify requester and start battle
-        await notify_rebattle_accepted(requester_id, opponent_id, new_battle_session, new_battle_id, scope_display)
-        await callback.answer("✅ Re-battle accepted!")
-        
-    except Exception as e:
-        logger.error(f"Error accepting rebattle: {e}")
-        await callback.answer("❌ Error processing acceptance")
-
-@router.callback_query(F.data.startswith('rebattle_decline_'))
-async def handle_rebattle_decline(callback: CallbackQuery):
-    """Handle re-battle decline"""
-    try:
-        request_id = callback.data.split("_", 2)[2]
-        
-        if request_id not in pending_rebattle_requests:
-            await callback.answer("❌ Request expired or invalid")
-            return
-        
-        request_data = pending_rebattle_requests[request_id]
-        requester_id = request_data["requester_id"]
-        opponent_id = request_data["opponent_id"]
-        
-        # Validate opponent
-        if callback.from_user.id != opponent_id:
-            await callback.answer("❌ Unauthorized action")
-            return
-        
-        # Clean up the request
-        del pending_rebattle_requests[request_id]
-        
-        # Update opponent's message
-        await callback.message.edit_text(
-            text="❌ Re-battle request declined.",
-            reply_markup=get_back_to_main_keyboard()
-        )
-        
-        # Notify requester about decline
-        await notify_rebattle_declined(requester_id)
-        await callback.answer("✅ Request declined")
-        
-    except Exception as e:
-        logger.error(f"Error declining rebattle: {e}")
-        await callback.answer("❌ Error processing decline")
-
-@router.callback_query(F.data.startswith('rebattle_cancel_'))
-async def handle_rebattle_cancel(callback: CallbackQuery):
-    """Handle re-battle request cancellation"""
-    try:
-        request_id = callback.data.split("_", 2)[2]
-        
-        if request_id not in pending_rebattle_requests:
-            await callback.answer("❌ Request not found")
-            return
-        
-        request_data = pending_rebattle_requests[request_id]
-        requester_id = request_data["requester_id"]
-        
-        # Validate requester
-        if callback.from_user.id != requester_id:
-            await callback.answer("❌ Unauthorized action")
-            return
-        
-        # Clean up the request
-        del pending_rebattle_requests[request_id]
-        
-        # Update requester's message
-        await callback.message.edit_text(
-            text="❌ Re-battle request cancelled.",
-            reply_markup=get_back_to_main_keyboard()
-        )
-        
-        await callback.answer("✅ Request cancelled")
-        
-    except Exception as e:
-        logger.error(f"Error cancelling rebattle: {e}")
-        await callback.answer("❌ Error processing cancellation")
-
-# Helper functions
-async def send_rebattle_request_to_opponent(request_id: str):
-    """Send re-battle request notification to opponent"""
-    try:
-        request_data = pending_rebattle_requests[request_id]
-        opponent_id = request_data["opponent_id"]
-        requester_name = request_data["requester_name"]
-        scope_display = request_data["scope_display"]
-        
-        request_message = (
-            f"🔄 <b>Re-battle Request!</b>\n\n"
-            f"{requester_name} wants to battle you again!\n\n"
-            f"📚 Topic: {scope_display}\n\n"
-            f"Do you accept this challenge?"
-        )
-        
-        await bot.send_message(
-            chat_id=opponent_id,
-            text=request_message,
-            reply_markup=get_rebattle_response_keyboard(request_id)
-        )
-        
-    except Exception as e:
-        logger.error(f"Error sending rebattle request: {e}")
-
-async def notify_rebattle_accepted(requester_id: int, opponent_id: int, battle_session: dict, battle_id: int, scope_display: str):
-    """Notify requester that re-battle was accepted and start battle"""
-    try:
-        # Send acceptance notification to requester
-        await bot.send_message(
-            chat_id=requester_id,
-            text="✅ Your re-battle request was accepted! Starting new battle..."
-        )
-        
-        # Send battle start message to both players
-        battle_start_msg = f"🥊 <b>New Battle Starting!</b>\n\n📚 Topic: {scope_display}\n\nGet ready!"
-        
-        await bot.send_message(chat_id=requester_id, text=battle_start_msg)
-        await bot.send_message(chat_id=opponent_id, text=battle_start_msg)
-        
-        # TODO: Implement actual battle start logic here
-        # You might need to modify start_battle_for_players to work with user IDs
-        # Or create mock callback objects from user IDs
-        
-    except Exception as e:
-        logger.error(f"Error notifying rebattle acceptance: {e}")
-
-async def notify_rebattle_declined(user_id: int):
-    """Notify user that their re-battle request was declined"""
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text="❌ Your re-battle request was declined by your opponent.",
-            reply_markup=get_back_to_main_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"Error notifying rebattle decline: {e}")
-
-async def create_new_battle_session(scope_display: str):
-    """Create a new battle session with different words from the same scope"""
-    try:
-        # Get different word IDs from the same scope/book
-        new_word_ids = await db.get_random_words_for_scope(scope_display, limit=15)
-        
-        if len(new_word_ids) < 10:
-            logger.warning(f"Not enough words for rebattle in scope: {scope_display}")
-            return None
-        
-        return {
-            "word_ids": new_word_ids,
-            "scope_display": scope_display
-        }
-        
-    except Exception as e:
-        logger.error(f"Error creating new battle session: {e}")
-        return None
-
-def generate_battle_id():
-    """Generate unique battle ID"""
-    return int(time.time() * 1000)
-
-# Cleanup function (call this periodically)
-async def cleanup_expired_rebattle_requests():
-    """Remove expired re-battle requests (older than 5 minutes)"""
-    current_time = time.time()
-    expired_requests = [
-        request_id for request_id, request_data in pending_rebattle_requests.items()
-        if current_time - request_data["timestamp"] > 300  # 5 minutes
-    ]
-    
-    for request_id in expired_requests:
-        logger.info(f"Cleaning up expired rebattle request: {request_id}")
-        del pending_rebattle_requests[request_id]
-    
-    return len(expired_requests)
