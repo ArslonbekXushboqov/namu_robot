@@ -7,6 +7,7 @@ import time
 import json
 import random
 
+from .callback_handlers import start_battle_for_players
 from keyboards.inline import (
     get_main_menu_keyboard, get_battle_type_keyboard, 
     get_book_selection_keyboard, get_scope_selection_keyboard,
@@ -26,84 +27,93 @@ router = Router()
 # Initialize database manager
 db = VocabularyBattleDB(settings.DATABASE_PATH)
 
-# Add these imports to your existing imports
+# Add these imports if not already present
 import uuid
+from datetime import datetime, timedelta
 
-# Add this storage for rebattle requests (similar to active_battles)
-rebattle_requests = {}
+# Dictionary to store pending rebattle requests
+pending_rebattles = {}
 
 @router.callback_query(F.data.startswith("rebattle_"))
-async def rebattle_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
+async def rebattle_request_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Handle rebattle request"""
     try:
-        await callback.answer("This feature is coming soon...", show_alert=True)
-        # # Parse callback data: rebattle_{current_user_id}_{opponent_id}_{battle_id}
-        # parts = callback.data.split("_")
-        # current_user_id = int(parts[1])
-        # opponent_id = int(parts[2])
-        # battle_id = int(parts[3])
+        # Parse callback data: rebattle_{current_user_id}_{opponent_id}_{battle_config}
+        data_parts = callback.data.split("_", 3)  # Split into max 4 parts
+        current_user_id = int(data_parts[1])
+        opponent_id = int(data_parts[2])
+        battle_config = data_parts[3]  # This could be "book_123" or "topic_456"
         
-        # # Verify the current user is the one making the request
-        # if callback.from_user.id != current_user_id:
-        #     await callback.answer("❌ Invalid request!")
-        #     return
+        # Verify the current user is actually the one making the request
+        if callback.from_user.id != current_user_id:
+            await callback.answer(Messages.INVALID_REQUEST)
+            return
         
-        # # Get previous battle data from database
-        # battle_data = await db.get_battle_by_code(battle_id)
-        # if not battle_data:
-        #     await callback.answer("❌ Battle data not found!")
-        #     return
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())[:8]  # Short unique ID
         
-        # # Generate unique request ID
-        # request_id = str(uuid.uuid4())[:8]
+        # Store rebattle request
+        pending_rebattles[request_id] = {
+            "requester_id": current_user_id,
+            "opponent_id": opponent_id,
+            "battle_config": battle_config,
+            "timestamp": datetime.now(),
+            "requester_message_id": callback.message.message_id,
+            "requester_chat_id": callback.message.chat.id
+        }
         
-        # # Store rebattle request
-        # rebattle_requests[request_id] = {
-        #     "requester_id": current_user_id,
-        #     "opponent_id": opponent_id,
-        #     "session_type": battle_data["session_type"],
-        #     "original_battle_id": battle_id,
-        #     "requester_message_id": callback.message.message_id
-        # }
+        # Parse battle config to get readable info
+        config_parts = battle_config.split("_")
+        config_type = config_parts[0]  # "book" or "topic"
+        config_id = int(config_parts[1])
         
-        # # Get requester name
-        # requester_name = callback.from_user.first_name or "Unknown"
+        # Get battle info for display
+        if config_type == "book":
+            book = await db.get_book_by_id(config_id)
+            battle_info = Messages.BOOK_BATTLE_INFO.format(book_title=book['title']) if book else Messages.BOOK_BATTLE_DEFAULT
+        else:  # topic
+            topic = await db.get_topic_by_id(config_id)
+            battle_info = Messages.TOPIC_BATTLE_INFO.format(topic_title=topic['title']) if topic else Messages.TOPIC_BATTLE_DEFAULT
         
-        # # Send rebattle request to opponent
-        # request_message = f"🔄 **Rebattle Request!**\n\n" \
-        #                  f"👤 **{requester_name}** wants to battle you again!\n" \
-        #                  f"📊 Previous battle scope: {battle_data['session_type'].title()}\n\n" \
-        #                  f"Do you accept the challenge?"
+        # Send rebattle request to opponent
+        request_message = Messages.REBATTLE_REQUEST_MESSAGE.format(
+            requester_name=callback.from_user.first_name,
+            battle_info=battle_info
+        )
         
-        # try:
-        #     opponent_message = await bot.send_message(
-        #         chat_id=opponent_id,
-        #         text=request_message,
-        #         reply_markup=acc_rebattle_btn(request_id)
-        #     )
+        try:
+            await bot.send_message(
+                chat_id=opponent_id,
+                text=request_message,
+                reply_markup=acc_rebattle_btn(request_id),
+                parse_mode="HTML"
+            )
             
-        #     # Store opponent message ID for later cleanup
-        #     rebattle_requests[request_id]["opponent_message_id"] = opponent_message.message_id
+            # Update requester's message
+            await callback.message.edit_text(
+                Messages.REBATTLE_REQUEST_SENT.format(
+                    opponent_name=await get_user_name(opponent_id, bot),
+                    battle_info=battle_info
+                ),
+                reply_markup=dec_rebattle_btn(request_id),
+                parse_mode="HTML"
+            )
             
-        #     # Update requester's message
-        #     await callback.message.edit_text(
-        #         f"🔄 **Rebattle request sent!**\n\n" \
-        #         f"⏳ Waiting for opponent's response...",
-        #         reply_markup=dec_rebattle_btn(request_id)
-        #     )
+            await callback.answer(Messages.REBATTLE_REQUEST_SENT_SHORT)
             
-        #     await callback.answer("✅ Rebattle request sent!")
-            
-        # except Exception as e:
-        #     logger.error(f"Error sending rebattle request to opponent: {e}")
-        #     # Clean up the request
-        #     if request_id in rebattle_requests:
-        #         del rebattle_requests[request_id]
-        #     await callback.answer("❌ Could not send request to opponent!")
-            
+        except Exception as e:
+            if "chat not found" in str(e).lower() or "user is deactivated" in str(e).lower():
+                await callback.answer(Messages.UNABLE_TO_SEND_REQUEST)
+                # Clean up the pending request
+                if request_id in pending_rebattles:
+                    del pending_rebattles[request_id]
+            else:
+                logger.error(f"Error sending rebattle request: {e}")
+                await callback.answer(Messages.ERROR_SENDING_REQUEST)
+        
     except Exception as e:
-        logger.error(f"Error handling rebattle request: {e}")
-        await callback.answer("❌ Error processing rebattle request!")
+        logger.error(f"Error in rebattle request: {e}")
+        await callback.answer(Messages.ERROR_PROCESSING_REQUEST)
 
 @router.callback_query(F.data.startswith("accept_rebattle_"))
 async def accept_rebattle_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
@@ -111,205 +121,215 @@ async def accept_rebattle_handler(callback: CallbackQuery, state: FSMContext, bo
     try:
         request_id = callback.data.split("_", 2)[2]
         
-        if request_id not in rebattle_requests:
-            await callback.answer("❌ Request expired or not found!")
+        if request_id not in pending_rebattles:
+            await callback.answer(Messages.REQUEST_EXPIRED_SHORT)
+            await callback.message.edit_text(Messages.REQUEST_EXPIRED)
             return
         
-        request_data = rebattle_requests[request_id]
+        request_data = pending_rebattles[request_id]
         
         # Verify the current user is the opponent
         if callback.from_user.id != request_data["opponent_id"]:
-            await callback.answer("❌ Invalid request!")
+            await callback.answer(Messages.INVALID_REQUEST)
             return
         
-        # Get session type and create new battle session
-        session_type = request_data["session_type"]
+        requester_id = request_data["requester_id"]
+        battle_config = request_data["battle_config"]
         
+        # Parse battle config
+        config_parts = battle_config.split("_")
+        config_type = config_parts[0]  # "book" or "topic"
+        config_id = int(config_parts[1])
+        
+        # Create battle session (reuse existing logic)
         try:
-            # Get a new random battle session based on session type
-            if session_type == "book":
-                # Get the original battle to find which book was used
-                original_battle = await db.get_battle_by_code(request_data["original_battle_id"])
-                original_session = await db.get_battle_session_by_id(original_battle["session_id"])
-                
-                # Get a new random session for the same book
-                # You'll need to extract book_id from the original session or store it in battle_history
-                # For now, I'll assume you can get it from the session
-                battle_session = await db.get_random_battle_session_book(original_session["book_id"])
-                book = await db.get_book_by_id(original_session["book_id"])
-                scope_display = f"📚 All vocabularies from {book['title']}"
-                
+            if config_type == "book":
+                battle_session = await db.get_random_battle_session_book(config_id)
+                book = await db.get_book_by_id(config_id)
+                scope_display = Messages.SCOPE_ALL_VOCABULARIES.format(book_title=book['title']) if book else Messages.BOOK_BATTLE_DEFAULT
             else:  # topic
-                # Get the original battle to find which topic was used
-                original_battle = await db.get_battle_by_code(request_data["original_battle_id"])
-                original_session = await db.get_battle_session_by_id(original_battle["session_id"])
-                
-                # Get a new random session for the same topic
-                battle_session = await db.get_random_battle_session_topic(original_session["topic_id"])
-                topic = await db.get_topic_by_id(original_session["topic_id"])
-                scope_display = f"📝 Topic: {topic['title']}"
+                battle_session = await db.get_random_battle_session_topic(config_id)
+                topic = await db.get_topic_by_id(config_id)
+                scope_display = Messages.SCOPE_SPECIFIC_TOPIC.format(topic_title=topic['title']) if topic else Messages.TOPIC_BATTLE_DEFAULT
             
             if not battle_session:
-                await callback.answer("❌ No battle session available!")
+                await callback.answer(Messages.BATTLE_SESSION_NOT_AVAILABLE)
+                await callback.message.edit_text(Messages.BATTLE_NOT_AVAILABLE)
                 # Clean up
-                await cleanup_rebattle_request(request_id, bot)
+                del pending_rebattles[request_id]
                 return
             
-            # Create new battle record
+            # Create battle in database
             battle_id = await db.create_battle(
                 session_id=battle_session["id"],
-                session_type=session_type,
-                player1_id=request_data["requester_id"],
-                player2_id=request_data["opponent_id"]
+                session_type=battle_config,
+                player1_id=requester_id,
+                player2_id=callback.from_user.id
             )
             
-            # Prepare message data for battle start
+            # Update both messages to show acceptance
+            await callback.message.delete()
+            
+            # Update requester's message
+            try:
+                await bot.delete_message(
+                    chat_id=request_data["requester_chat_id"],
+                    message_id=request_data["requester_message_id"]
+                )
+            except Exception as e:
+                logger.error(f"Error updating requester message: {e}")
+            
+            # Start the battle using existing logic
             msg_user_data = {
                 'player1': {
-                    'user_id': request_data["requester_id"],
+                    'user_id': requester_id,
                     'msg_id': request_data["requester_message_id"]
                 },
                 'player2': {
-                    'user_id': request_data["opponent_id"],
+                    'user_id': callback.from_user.id,
                     'msg_id': callback.message.message_id
-                }
+                },
+                'battle_type': "re"
             }
             
-            # Clean up rebattle request
-            await cleanup_rebattle_request(request_id, bot, delete_messages=False)
+            await start_battle_for_players(msg_user_data, battle_session, battle_id, battle_config, scope_display, bot)
             
-            # Start the battle
-            await start_battle_for_players(msg_user_data, battle_session, battle_id, scope_display, bot)
-            
-            await callback.answer("✅ Rebattle accepted! Starting battle...")
+            # Clean up pending request
+            del pending_rebattles[request_id]
             
         except Exception as e:
-            logger.error(f"Error creating rebattle session: {e}")
-            await callback.answer("❌ Error starting rebattle!")
-            await cleanup_rebattle_request(request_id, bot)
-            
+            logger.error(f"Error creating rebattle: {e}")
+            # Clean up
+            if request_id in pending_rebattles:
+                del pending_rebattles[request_id]
+        
     except Exception as e:
         logger.error(f"Error accepting rebattle: {e}")
-        await callback.answer("❌ Error accepting rebattle!")
+        await callback.answer(Messages.ERROR_PROCESSING_ACCEPTANCE)
 
 @router.callback_query(F.data.startswith("decline_rebattle_"))
-async def decline_rebattle_handler(callback: CallbackQuery, bot: Bot):
+async def decline_rebattle_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Handle rebattle decline"""
     try:
         request_id = callback.data.split("_", 2)[2]
         
-        if request_id not in rebattle_requests:
-            await callback.answer("❌ Request expired or not found!")
+        if request_id not in pending_rebattles:
+            await callback.answer(Messages.REQUEST_EXPIRED_SHORT)
+            await callback.message.edit_text(Messages.REQUEST_EXPIRED)
             return
         
-        request_data = rebattle_requests[request_id]
+        request_data = pending_rebattles[request_id]
         
         # Verify the current user is the opponent
         if callback.from_user.id != request_data["opponent_id"]:
-            await callback.answer("❌ Invalid request!")
+            await callback.answer(Messages.INVALID_REQUEST)
             return
         
-        # Notify requester about decline
-        try:
-            await bot.edit_message_text(
-                chat_id=request_data["requester_id"],
-                message_id=request_data["requester_message_id"],
-                text="❌ **Rebattle Declined**\n\nYour opponent declined the rebattle request.",
-                reply_markup=get_back_to_main_keyboard()
-            )
-        except Exception as e:
-            logger.error(f"Error notifying requester about decline: {e}")
+        requester_id = request_data["requester_id"]
         
         # Update opponent's message
         await callback.message.edit_text(
-            "❌ **Rebattle Declined**\n\nYou declined the rebattle request.",
-            reply_markup=get_back_to_main_keyboard()
+            Messages.REBATTLE_DECLINED_OPPONENT.format(
+                requester_name=await get_user_name(requester_id, bot)
+            ),
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
         )
         
-        # Clean up request
-        if request_id in rebattle_requests:
-            del rebattle_requests[request_id]
+        # Notify requester
+        try:
+            await bot.edit_message_text(
+                chat_id=request_data["requester_chat_id"],
+                message_id=request_data["requester_message_id"],
+                text=Messages.REBATTLE_DECLINED_REQUESTER.format(
+                    opponent_name=callback.from_user.first_name
+                ),
+                reply_markup=get_back_to_main_keyboard(),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error notifying requester: {e}")
         
-        await callback.answer("✅ Rebattle declined!")
+        # Clean up
+        del pending_rebattles[request_id]
+        await callback.answer(Messages.REBATTLE_DECLINED_SHORT)
         
     except Exception as e:
         logger.error(f"Error declining rebattle: {e}")
-        await callback.answer("❌ Error declining rebattle!")
+        await callback.answer(Messages.ERROR_PROCESSING_DECLINE)
 
 @router.callback_query(F.data.startswith("cancel_rebattle_"))
-async def cancel_rebattle_handler(callback: CallbackQuery, bot: Bot):
+async def cancel_rebattle_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """Handle rebattle cancellation by requester"""
     try:
         request_id = callback.data.split("_", 2)[2]
         
-        if request_id not in rebattle_requests:
-            await callback.answer("❌ Request expired or not found!")
+        if request_id not in pending_rebattles:
+            await callback.answer(Messages.REQUEST_EXPIRED_SHORT)
+            await callback.message.edit_text(
+                Messages.REQUEST_EXPIRED,
+                reply_markup=get_back_to_main_keyboard()
+            )
             return
         
-        request_data = rebattle_requests[request_id]
+        request_data = pending_rebattles[request_id]
         
         # Verify the current user is the requester
         if callback.from_user.id != request_data["requester_id"]:
-            await callback.answer("❌ Invalid request!")
+            await callback.answer(Messages.INVALID_REQUEST)
             return
         
         # Update requester's message
         await callback.message.edit_text(
-            "❌ **Rebattle Cancelled**\n\nYou cancelled the rebattle request.",
-            reply_markup=get_back_to_main_keyboard()
+            Messages.REBATTLE_REQUEST_CANCELLED,
+            reply_markup=get_back_to_main_keyboard(),
+            parse_mode="HTML"
         )
         
-        # Clean up (this will also delete opponent's message)
-        await cleanup_rebattle_request(request_id, bot)
+        # Try to notify opponent that request was cancelled
+        try:
+            opponent_id = request_data["opponent_id"]
+            await bot.send_message(
+                chat_id=opponent_id,
+                text=Messages.REBATTLE_REQUEST_CANCELLED_NOTIFICATION.format(
+                    requester_name=callback.from_user.first_name
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error notifying opponent about cancellation: {e}")
         
-        await callback.answer("✅ Rebattle request cancelled!")
+        # Clean up
+        del pending_rebattles[request_id]
+        await callback.answer(Messages.REQUEST_CANCELLED_SHORT)
         
     except Exception as e:
         logger.error(f"Error cancelling rebattle: {e}")
-        await callback.answer("❌ Error cancelling rebattle!")
+        await callback.answer(Messages.ERROR_CANCELLING_REQUEST)
 
-async def cleanup_rebattle_request(request_id: str, bot: Bot, delete_messages: bool = True):
-    """Clean up rebattle request and optionally delete messages"""
+# Helper function to get user name
+async def get_user_name(user_id: int, bot: Bot) -> str:
+    """Get user's first name from Telegram"""
     try:
-        if request_id not in rebattle_requests:
-            return
-        
-        request_data = rebattle_requests[request_id]
-        
-        if delete_messages:
-            # Try to delete opponent's message
-            try:
-                await bot.delete_message(
-                    chat_id=request_data["opponent_id"],
-                    message_id=request_data["opponent_message_id"]
-                )
-            except Exception as e:
-                logger.error(f"Error deleting opponent message: {e}")
-        
-        # Remove from storage
-        del rebattle_requests[request_id]
-        
-    except Exception as e:
-        logger.error(f"Error cleaning up rebattle request: {e}")
+        chat = await bot.get_chat(user_id)
+        return chat.first_name or Messages.DEFAULT_USER_NAME
+    except Exception:
+        return Messages.DEFAULT_USER_NAME
 
-# Add cleanup for expired requests (optional - call this periodically)
-async def cleanup_expired_rebattle_requests(bot: Bot, max_age_minutes: int = 10):
-    """Clean up rebattle requests older than max_age_minutes"""
-    try:
-        current_time = time.time()
-        expired_requests = []
-        
-        for request_id, request_data in rebattle_requests.items():
-            # Assuming you add timestamp when creating request
-            if hasattr(request_data, 'timestamp'):
-                if current_time - request_data['timestamp'] > (max_age_minutes * 60):
-                    expired_requests.append(request_id)
-        
-        for request_id in expired_requests:
-            await cleanup_rebattle_request(request_id, bot)
-            
-    except Exception as e:
-        logger.error(f"Error cleaning up expired requests: {e}")
+# Clean up expired rebattle requests (call this periodically)
+async def cleanup_expired_rebattles():
+    """Remove expired rebattle requests (older than 5 minutes)"""
+    current_time = datetime.now()
+    expired_requests = []
+    
+    for request_id, request_data in pending_rebattles.items():
+        if current_time - request_data["timestamp"] > timedelta(minutes=5):
+            expired_requests.append(request_id)
+    
+    for request_id in expired_requests:
+        del pending_rebattles[request_id]
+    
+    logger.info(f"Cleaned up {len(expired_requests)} expired rebattle requests")
 
 def register_basic_handlers(dp, bot):
     """Register basic handlers"""
